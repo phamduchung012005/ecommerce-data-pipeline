@@ -46,3 +46,36 @@ flowchart LR
     CSV --> EL --> STG --> ELT --> DWH --> ML --> OUT
     DWH --> PBI
     OUT --> PBI
+
+---
+
+## 3. Thiết kế Kho dữ liệu & Mô hình phân cụm (Data Modeling & ML)
+
+### Mô hình Star Schema trên BigQuery (`olist_dwh`)
+| Tên bảng | Loại bảng | Mô tả chi tiết |
+| :--- | :--- | :--- |
+| **`fact_order_items`** | Fact Table | Lưu trữ chi tiết từng sản phẩm trong mỗi đơn hàng thành công (`price`, `freight_value`, `order_purchase_date`, cùng các khóa ngoại `product_id`, `customer_id`, `seller_id`). |
+| **`dim_customers`** | Dimension | Thông tin định danh và khu vực địa lý của khách hàng (`customer_id`, `customer_unique_id`, `customer_city`, `customer_state`, `customer_zip_code_prefix`). |
+| **`dim_products`** | Dimension | Thuộc tính sản phẩm (`product_id`, `product_category_name`, kích thước và trọng lượng). |
+| **`dim_date`** | Dimension | Bảng chiều thời gian chuẩn hóa theo ngày (`date_key`, `year`, `quarter`, `month`, `day`, `weekday`). |
+| **`rfm_clusters`** | Mart / ML Table | Bảng tổng hợp 3 chỉ số **Recency** (số ngày từ lần mua gần nhất), **Frequency** (tần suất mua), **Monetary** (tổng chi tiêu) kèm nhãn cụm `cluster` (0–3). |
+
+---
+
+## 4. Cấu trúc thư mục (Repository Structure)
+
+```text
+ecommerce-data-pipeline/
+├── dags/
+│   └── olist_to_bigquery_dag.py      # DAG chính điều phối 10 tác vụ ELT & K-Means trên Airflow
+├── docs/
+│   ├── airflow_dag_graph.png         # Ảnh chụp luồng chạy xanh 10 tasks trên Airflow UI
+│   └── powerbi_dashboard.png         # Ảnh chụp giao diện báo cáo Power BI kết nối BigQuery
+├── docker-compose.yaml               # Cấu hình cụm Airflow (Webserver, Scheduler, Worker, Postgres, Redis)
+├── Olist_BigQuery_Dashboard.pbix     # Dashboard Power BI v2.0 kết nối trực tiếp Google BigQuery
+├── Project Dashboard.pbix            # Dashboard Power BI v1.0 (Local SQL Server MVP)
+├── etl_pipeline.py                   # Script ETL phiên bản Local v1.0
+├── ml_rfm_clustering.py              # Script phân cụm K-Means phiên bản Local v1.0
+├── SQLQuery1.sql ... SQLQuery6.sql   # Các truy vấn T-SQL xây dựng DWH phiên bản Local v1.0
+├── .gitignore                        # Chặn file dữ liệu (.csv), credentials (.json), logs và venv
+└── README.md                         # Tài liệu mô tả kiến trúc và hướng dẫn triển khai
