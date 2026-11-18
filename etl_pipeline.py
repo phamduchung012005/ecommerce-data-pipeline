@@ -122,49 +122,52 @@ params = urllib.parse.quote_plus(
 engine = create_engine(f"mssql+pyodbc:///?odbc_connect={params}")
 
 # 4. Thực hiện đẩy dữ liệu
-print("Đang đẩy dữ liệu vào bảng 'stg_orders'...")
 try:
-    # Lệnh to_sql sẽ tự động tạo bảng stg_orders trong SQL Server nếu chưa có
-    # if_exists='replace': Nếu bảng đã tồn tại, nó sẽ xóa bảng cũ và tạo bảng mới
-    # index=False: Không đẩy cột số thứ tự mặc định của Pandas vào database
-    df_orders.to_sql('stg_orders', con=engine, if_exists='replace', index=False)
-    
-    print("HOÀN TẤT! Dữ liệu đã nằm gọn trong SQL Server.")
-except Exception as e:
-    print(f"Có lỗi xảy ra trong quá trình Load: {e}")
+    with engine.begin() as connection:
+        print("Đang đẩy dữ liệu vào bảng 'stg_orders'...")
+        df_orders.to_sql(
+            name='stg_orders',
+            con=connection,
+            if_exists='replace',
+            index=False,
+            chunksize=1000
+        )
+        print("HOÀN TẤT! Bảng stg_orders đã được tạo.")
 
-# 5. Thực hiện đẩy dữ liệu
-print("Đang đẩy dữ liệu vào bảng 'stg_order_items'...")
-try:
-    # Lệnh to_sql sẽ tự động tạo bảng stg_order_items trong SQL Server nếu chưa có
-    # if_exists='replace': Nếu bảng đã tồn tại, nó sẽ xóa bảng cũ và tạo bảng mới
-    # index=False: Không đẩy cột số thứ tự mặc định của Pandas vào database
-    df_order_items.to_sql('stg_order_items', con=engine, if_exists='replace', index=False)
-    
-    print("HOÀN TẤT! Dữ liệu đã nằm gọn trong SQL Server.")
-except Exception as e:
-    print(f"Có lỗi xảy ra trong quá trình Load: {e}")
+        print("Đang đẩy dữ liệu vào bảng 'stg_order_items'...")
+        df_order_items.to_sql(
+            name='stg_order_items',
+            con=connection,
+            if_exists='replace',
+            index=False,
+            chunksize=1000
+        )
+        print("HOÀN TẤT! Bảng stg_order_items đã được tạo.")
 
-# 6. Thực hiện đẩy dữ liệu
-print("Đang đẩy dữ liệu vào bảng 'stg_customers'...")
-try:
-    # Lệnh to_sql sẽ tự động tạo bảng stg_customers trong SQL Server nếu chưa có
-    # if_exists='replace': Nếu bảng đã tồn tại, nó sẽ xóa bảng cũ và tạo bảng mới
-    # index=False: Không đẩy cột số thứ tự mặc định của Pandas vào database
-    df_customers.to_sql('stg_customers', con=engine, if_exists='replace', index=False)
-        
-    print("HOÀN TẤT! Dữ liệu đã nằm gọn trong SQL Server.")
-except Exception as e:
-    print(f"Có lỗi xảy ra trong quá trình Load: {e}")
+        print("Đang đẩy dữ liệu vào bảng 'stg_customers'...")
+        df_customers.to_sql(
+            name='stg_customers',
+            con=connection,
+            if_exists='replace',
+            index=False,
+            chunksize=1000
+        )
+        print("HOÀN TẤT! Bảng stg_customers đã được tạo.")
 
-# 7. Thực hiện đẩy dữ liệu
-print("Đang đẩy dữ liệu vào bảng 'stg_products'...")
-try:
-    # Lệnh to_sql sẽ tự động tạo bảng stg_products trong SQL Server nếu chưa có
-    # if_exists='replace': Nếu bảng đã tồn tại, nó sẽ xóa bảng cũ và tạo bảng mới
-    # index=False: Không đẩy cột số thứ tự mặc định của Pandas vào database
-    df_products.to_sql('stg_products', con=engine, if_exists='replace', index=False)
-        
-    print("HOÀN TẤT! Dữ liệu đã nằm gọn trong SQL Server.")
+        print("Đang đẩy dữ liệu vào bảng 'stg_products'...")
+        df_products.to_sql(
+            name='stg_products',
+            con=connection,
+            if_exists='replace',
+            index=False,
+            chunksize=1000
+        )
+        print("HOÀN TẤT! Bảng stg_products đã được tạo.")
+
+    print("\nĐÃ LOAD THÀNH CÔNG TOÀN BỘ DỮ LIỆU!")
+
 except Exception as e:
-    print(f"Có lỗi xảy ra trong quá trình Load: {e}")
+    print(f"\nCó lỗi xảy ra trong quá trình Load: {e}")
+
+finally:
+    engine.dispose()
