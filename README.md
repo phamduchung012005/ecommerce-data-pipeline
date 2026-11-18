@@ -48,6 +48,7 @@ flowchart LR
     OUT --> PBI
 
 ---
+```
 
 ## 3. Thiết kế Kho dữ liệu & Mô hình phân cụm (Data Modeling & ML)
 
@@ -79,3 +80,25 @@ ecommerce-data-pipeline/
 ├── SQLQuery1.sql ... SQLQuery6.sql   # Các truy vấn T-SQL xây dựng DWH phiên bản Local v1.0
 ├── .gitignore                        # Chặn file dữ liệu (.csv), credentials (.json), logs và venv
 └── README.md                         # Tài liệu mô tả kiến trúc và hướng dẫn triển khai
+
+---
+```
+   
+## 5. Trực quan hóa dữ liệu (Power BI Dashboard)
+
+### Luồng điều phối 10 tác vụ trên Apache Airflow
+![Airflow DAG Graph](docs/airflow_dag_graph.png)
+
+### Báo cáo phân tích kinh doanh & phân cụm khách hàng
+![Power BI Dashboard](docs/powerbi_dashboard.png)
+
+* **Theo dõi hiệu suất kinh doanh:** Tổng doanh thu, số lượng đơn hàng, giá trị trung bình đơn hàng (AOV) và xu hướng tăng trưởng theo thời gian.
+* **Phân tích danh mục & địa lý:** Xếp hạng nhóm ngành hàng chủ lực và phân bổ sức mua theo các bang tại Brazil.
+* **Phân khúc khách hàng RFM (K-Means):** Biểu đồ phân tán (Scatter Plot) trực quan hóa 4 cụm khách hàng dựa trên Recency – Frequency – Monetary, hỗ trợ đề xuất chiến lược giữ chân khách hàng VIP và tái kích hoạt nhóm khách hàng sắp rời bỏ.
+
+---
+
+## 6. Tác giả (Author)
+
+* **Phạm Đức Hùng** — Sinh viên năm 4 tại **Đại học Bách Khoa Hà Nội (HUST)** | Định hướng **Data Engineer**
+* **GitHub:** [github.com/phamduchung012005](https://github.com/phamduchung012005)
