@@ -3,6 +3,7 @@ from airflow.operators.python import PythonOperator
 from datetime import datetime
 import pandas as pd
 from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
@@ -14,13 +15,13 @@ DATA_DIR = '/opt/airflow/data'
 def get_bq_client():
     return bigquery.Client.from_service_account_json(CREDENTIALS_PATH, project=PROJECT_ID)
 
-def load_df_to_bigquery(df, table_name):
+def load_df_to_bigquery(df, table_name, write_disposition="WRITE_TRUNCATE"):
     client = get_bq_client()
     table_id = f"{PROJECT_ID}.{DATASET_ID}.{table_name}"
-    job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
+    job_config = bigquery.LoadJobConfig(write_disposition=write_disposition)
     job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
     job.result()
-    print(f"Đã tải thành công {len(df)} dòng vào {table_id}")
+    print(f"Đã tải thành công {len(df)} dòng vào {table_id} (Chế độ: {write_disposition})")
 
 def run_bq_sql(sql):
     client = get_bq_client()
@@ -30,6 +31,25 @@ def run_bq_sql(sql):
 
 # --- PHA 1: EXTRACT & LOAD VÀO STAGING ---
 def etl_orders():
+    client = get_bq_client()
+    table_id = f"{PROJECT_ID}.{DATASET_ID}.stg_orders"
+
+    # 1. Truy vấn mốc thời gian mới nhất (High-Watermark) hiện có trên BigQuery
+    watermark_dt = None
+    try:
+        client.get_table(table_id)
+        query = f"SELECT MAX(order_purchase_timestamp) AS max_ts FROM `{table_id}`"
+        result = list(client.query(query).result())
+        last_watermark = result[0].max_ts
+        if last_watermark is not None:
+            watermark_dt = pd.to_datetime(last_watermark)
+            # Đồng bộ bỏ múi giờ UTC để khớp với kiểu datetime đọc từ file CSV
+            if watermark_dt.tzinfo is not None:
+                watermark_dt = watermark_dt.tz_localize(None)
+    except NotFound:
+        print("Bảng stg_orders chưa tồn tại trên BigQuery. Tiến hành nạp toàn bộ lần đầu (Full Load).")
+
+    # 2. Đọc và làm sạch dữ liệu nguồn
     df = pd.read_csv(f"{DATA_DIR}/olist_orders_dataset.csv")
     df = df[df['order_status'] == 'delivered'].copy()
     date_cols = [
@@ -40,7 +60,18 @@ def etl_orders():
     for col in date_cols:
         df[col] = pd.to_datetime(df[col])
     df = df.dropna(subset=['order_delivered_customer_date'])
-    load_df_to_bigquery(df, 'stg_orders')
+
+    # 3. Lọc dữ liệu tăng dần (Incremental Filter)
+    if watermark_dt is not None:
+        print(f"High-Watermark hiện tại trên BigQuery: {watermark_dt}")
+        df = df[df['order_purchase_timestamp'] > watermark_dt]
+
+    if len(df) == 0:
+        print("Không phát hiện đơn hàng mới nào sau mốc Watermark. Bỏ qua bước nạp để tối ưu chi phí!")
+        return
+
+    print(f"Phát hiện {len(df)} đơn hàng mới. Tiến hành nạp nối tiếp (WRITE_APPEND)...")
+    load_df_to_bigquery(df, 'stg_orders', write_disposition="WRITE_APPEND")
 
 def etl_order_items():
     df = pd.read_csv(f"{DATA_DIR}/olist_order_items_dataset.csv")
@@ -141,6 +172,47 @@ def build_rfm_model():
     """
     run_bq_sql(sql)
 
+# --- PHA 2.5: TRẠM KIỂM SOÁT CHẤT LƯỢNG DỮ LIỆU (DATA QUALITY GATE) ---
+def run_data_quality_checks():
+    client = get_bq_client()
+    print("Bắt đầu chạy bộ kiểm thử chất lượng dữ liệu (Data Quality Checks) trên BigQuery...")
+
+    # Kiểm tra 1: Bảng Fact không rỗng và giá bán (price) phải dương, không NULL
+    q_fact = f"""
+    SELECT 
+        COUNT(*) AS total_rows,
+        COUNTIF(price IS NULL OR price <= 0) AS invalid_price_rows
+    FROM `{PROJECT_ID}.{DATASET_ID}.fact_order_items`
+    """
+    res_fact = list(client.query(q_fact).result())[0]
+    if res_fact.total_rows == 0 or res_fact.invalid_price_rows > 0:
+        raise ValueError(f"[DQ FAILED] fact_order_items lỗi: total={res_fact.total_rows}, invalid_price={res_fact.invalid_price_rows}")
+    print(f"[PASS] fact_order_items hợp lệ ({res_fact.total_rows} dòng, 0 lỗi giá bán).")
+
+    # Kiểm tra 2: Khóa chính customer_id trong dim_customers không bị trùng lặp
+    q_dim_cust = f"""
+    SELECT 
+        COUNT(*) AS total_rows,
+        COUNT(DISTINCT customer_id) AS unique_keys
+    FROM `{PROJECT_ID}.{DATASET_ID}.dim_customers`
+    """
+    res_cust = list(client.query(q_dim_cust).result())[0]
+    if res_cust.total_rows == 0 or res_cust.total_rows != res_cust.unique_keys:
+        raise ValueError(f"[DQ FAILED] dim_customers trùng lặp khóa chính: total={res_cust.total_rows}, unique={res_cust.unique_keys}")
+    print(f"[PASS] dim_customers toàn vẹn khóa chính ({res_cust.unique_keys} khách hàng).")
+
+    # Kiểm tra 3: Miền giá trị toán học của bảng RFM trước khi đưa vào K-Means
+    q_rfm = f"""
+    SELECT 
+        COUNT(*) AS total_rows,
+        COUNTIF(recency IS NULL OR recency < 0 OR frequency IS NULL OR frequency < 1 OR monetary IS NULL OR monetary <= 0) AS invalid_rfm_rows
+    FROM `{PROJECT_ID}.{DATASET_ID}.rfm_model`
+    """
+    res_rfm = list(client.query(q_rfm).result())[0]
+    if res_rfm.total_rows == 0 or res_rfm.invalid_rfm_rows > 0:
+        raise ValueError(f"[DQ FAILED] rfm_model có dữ liệu bất thường: total={res_rfm.total_rows}, invalid={res_rfm.invalid_rfm_rows}")
+    print(f"[PASS] rfm_model đạt chuẩn đầu vào Machine Learning ({res_rfm.total_rows} bản ghi).")
+
 # --- PHA 3: MACHINE LEARNING PHÂN CỤM KHÁCH HÀNG ---
 def run_kmeans_clustering():
     client = get_bq_client()
@@ -162,6 +234,7 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     schedule_interval='@daily',
     catchup=False,
+    max_active_tasks=2,
     tags=['olist', 'bigquery', 'elt']
 ) as dag:
 
@@ -178,7 +251,8 @@ with DAG(
     t_dim_date = PythonOperator(task_id='build_dim_date', python_callable=build_dim_date)
     t_rfm = PythonOperator(task_id='build_rfm_model', python_callable=build_rfm_model)
 
-    # Task Machine Learning
+    # Task Data Quality Gate & Machine Learning
+    t_dq = PythonOperator(task_id='data_quality_checks', python_callable=run_data_quality_checks)
     t_kmeans = PythonOperator(task_id='run_kmeans_clustering', python_callable=run_kmeans_clustering)
 
     # Thiết lập luồng phụ thuộc đa nhánh
@@ -187,4 +261,6 @@ with DAG(
     [t_orders, t_items] >> t_fact_items
     t_fact_items >> t_dim_date
     [t_fact_items, t_dim_customers] >> t_rfm
-    t_rfm >> t_kmeans
+
+    # Toàn bộ Star Schema & RFM phải vượt qua trạm kiểm soát DQ trước khi huấn luyện K-Means
+    [t_dim_products, t_dim_date, t_rfm] >> t_dq >> t_kmeans
