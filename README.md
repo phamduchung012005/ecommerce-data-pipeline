@@ -46,9 +46,9 @@ flowchart LR
     CSV --> EL --> STG --> ELT --> DWH --> ML --> OUT
     DWH --> PBI
     OUT --> PBI
-
----
 ```
+---
+
 
 ## 3. Thiết kế Kho dữ liệu & Mô hình phân cụm (Data Modeling & ML)
 
