@@ -13,7 +13,7 @@ Dự án xây dựng một hệ thống **ELT Data Pipeline khép kín (End-to-E
 
 ### Quá trình nâng cấp kiến trúc (System Evolution)
 * **Phiên bản 1.0 (Local MVP):** Xử lý ETL cục bộ bằng Python scripts, lưu trữ trên **SQL Server** và kết nối Power BI (`Project Dashboard.pbix`).
-* **Phiên bản 2.0 (Modern Data Stack trên Cloud):** Chuyển đổi sang kiến trúc **ELT hiện đại** — đóng gói môi trường bằng **Docker Compose**, điều phối tự động 10 tác vụ bằng **Apache Airflow**, đẩy toàn bộ khối lượng tính toán biến đổi dữ liệu sang **Google BigQuery** và xuất báo cáo trực tiếp từ Cloud (`Olist_BigQuery_Dashboard.pbix`).
+* **Phiên bản 2.0 (Modern Data Stack trên Cloud):** Chuyển đổi sang kiến trúc **ELT hiện đại** — đóng gói môi trường bằng **Docker Compose**, điều phối tự động **11 tác vụ** (tích hợp **Incremental Load** & **Data Quality Gate**) bằng **Apache Airflow**, đẩy toàn bộ khối lượng tính toán biến đổi dữ liệu sang **Google BigQuery** và xuất báo cáo trực tiếp từ Cloud (`Olist_BigQuery_Dashboard.pbix`).
 
 ---
 
@@ -28,8 +28,9 @@ flowchart LR
     end
 
     subgraph Airflow["2. Docker & Apache Airflow"]
-        EL["Phase 1: Extract & Load\n(Python + Pandas + PyArrow)"]
+        EL["Phase 1: Incremental E&L\n(High-Watermark + PyArrow)"]
         ELT["Phase 2: Cloud ELT\n(GoogleSQL Orchestration)"]
+        DQ["Phase 2.5: Data Quality Gate\n(Automated SQL Assertions)"]
         ML["Phase 3: ML Pipeline\n(StandardScaler + K-Means)"]
     end
 
@@ -43,10 +44,15 @@ flowchart LR
         PBI["Power BI Desktop\n(Olist_BigQuery_Dashboard.pbix)"]
     end
 
-    CSV --> EL --> STG --> ELT --> DWH --> ML --> OUT
+    CSV --> EL --> STG --> ELT --> DWH --> DQ --> ML --> OUT
     DWH --> PBI
     OUT --> PBI
 ```
+
+1. **Pha 1 — Incremental Extract & Load (`etl_stg_*`):** Áp dụng cơ chế **High-Watermark** để chỉ lọc và nạp nối tiếp (`WRITE_APPEND`) các đơn hàng phát sinh mới sau mốc thời gian gần nhất trên BigQuery, giúp tối ưu chi phí quét và ghi dữ liệu.
+2. **Pha 2 — Transform thành Star Schema & RFM (`build_*`):** Thực thi các truy vấn GoogleSQL (`CREATE OR REPLACE TABLE`) trực tiếp trên BigQuery để xây dựng các bảng Dimension, bảng Fact và tính toán chỉ số RFM cho từng khách hàng duy nhất (`customer_unique_id`).
+3. **Pha 2.5 — Trạm kiểm soát chất lượng dữ liệu (`data_quality_checks`):** Tự động kiểm thử tính duy nhất của khóa chính (`customer_id`), miền giá trị dương của doanh thu (`price > 0`) và tính hợp lệ của bộ chỉ số RFM trước khi mở khóa cho mô hình học máy.
+4. **Pha 3 — Machine Learning Clustering (`run_kmeans_clustering`):** Tải bảng `rfm_model` đã đạt chuẩn, chuẩn hóa phân phối bằng `StandardScaler`, huấn luyện mô hình **K-Means (`k = 4`)** để phân nhóm khách hàng và ghi ngược bảng kết quả `rfm_clusters` lên BigQuery.
 ---
 
 
@@ -68,7 +74,7 @@ flowchart LR
 ```text
 ecommerce-data-pipeline/
 ├── dags/
-│   └── olist_to_bigquery_dag.py      # DAG chính điều phối 10 tác vụ ELT & K-Means trên Airflow
+│   └── olist_to_bigquery_dag.py      # DAG chính điều phối 11 tác vụ Incremental ELT, DQ & K-Means
 ├── docs/
 │   ├── airflow_dag_graph.png         # Ảnh chụp luồng chạy xanh 10 tasks trên Airflow UI
 │   └── powerbi_dashboard.png         # Ảnh chụp giao diện báo cáo Power BI kết nối BigQuery
@@ -86,7 +92,7 @@ ecommerce-data-pipeline/
    
 ## 5. Trực quan hóa dữ liệu (Power BI Dashboard)
 
-### Luồng điều phối 10 tác vụ trên Apache Airflow
+### Luồng điều phối 11 tác vụ trên Apache Airflow
 ![Airflow DAG Graph](docs/airflow_dag_graph.png)
 
 ### Báo cáo phân tích kinh doanh & phân cụm khách hàng
